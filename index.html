@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Image EQ — spectral equalizer for pictures</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <meta
+      name="description"
+      content="A pure-frontend image equalizer: 2D FFT, eight draggable frequency bands, live preview."
+    />
+    <link rel="stylesheet" href="styles.css?v=5" />
+  </head>
+  <body>
+    <main class="app" id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 28 28">
+              <path d="M4.5 17v-6M9 20.5v-13M13.5 18v-8M18 22V6M22.5 16v-4" />
+            </svg>
+          </span>
+          <span class="brand-copy">
+            <span class="brand-name">Image EQ</span>
+            <span class="brand-sub">Spectral picture EQ</span>
+          </span>
+        </div>
+
+        <div class="topbar-controls">
+          <button
+            class="power is-on"
+            id="bypassBtn"
+            type="button"
+            aria-pressed="false"
+            title="Bypass equalizer (B)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v9" />
+              <path d="M6.1 6.1a8.4 8.4 0 1 0 11.8 0" />
+            </svg>
+          </button>
+          <div class="select-wrap preset-wrap">
+            <select id="presetSelect" aria-label="EQ preset"></select>
+          </div>
+        </div>
+
+        <div class="toolbar-right">
+          <button class="ghost" id="sampleBtn" type="button">Sample</button>
+          <button class="ghost" id="openBtn" type="button">Open Image</button>
+          <button class="ghost ghost-accent" id="exportBtn" type="button">
+            Export PNG
+          </button>
+          <label class="view-control">
+            <span>View:</span>
+            <div class="select-wrap compact">
+              <select id="viewSelect" aria-label="Preview zoom">
+                <option value="fit">Fit</option>
+                <option value="1">100%</option>
+                <option value="2">200%</option>
+              </select>
+            </div>
+          </label>
+        </div>
+      </header>
+
+      <section class="eq-panel" aria-label="Equalizer">
+        <div class="band-row" id="bandButtons" role="group" aria-label="EQ bands"></div>
+        <div class="eq-canvas-wrap">
+          <canvas
+            id="eqCanvas"
+            role="application"
+            aria-label="EQ curve. Drag a node to change frequency and level. Drag the shaded edges to change Q. Use scroll for Q."
+          ></canvas>
+        </div>
+        <div class="eq-foot">
+          <div class="base-control">
+            <span class="base-label">Base</span>
+            <div class="base-switch" role="group" aria-label="EQ base plane">
+              <button
+                type="button"
+                id="baseZero"
+                data-base="zero"
+                title="Zero base (0%): each point adds only its own band"
+              >
+                Zero
+              </button>
+              <button
+                type="button"
+                id="baseFlat"
+                data-base="flat"
+                title="Flat base (100%): each point is a local deviation"
+              >
+                Flat
+              </button>
+            </div>
+          </div>
+          <div class="range-wrap">
+            <button
+              class="range-btn"
+              id="rangeBtn"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              title="Set the EQ frequency range"
+            >
+              <span class="range-btn-label">Range</span>
+              <span class="range-value" id="rangeValue">20–20k</span>
+            </button>
+            <div
+              class="range-popover"
+              id="rangePopover"
+              role="dialog"
+              aria-label="Frequency range"
+              hidden
+            >
+              <div class="range-pop-title">Frequency range</div>
+              <div class="range-fields">
+                <label class="range-field">
+                  <span>From</span>
+                  <span class="range-input">
+                    <input
+                      id="rangeMin"
+                      type="number"
+                      min="20"
+                      max="20000"
+                      step="1"
+                      value="20"
+                      inputmode="numeric"
+                    /><i>Hz</i>
+                  </span>
+                </label>
+                <label class="range-field">
+                  <span>To</span>
+                  <span class="range-input">
+                    <input
+                      id="rangeMax"
+                      type="number"
+                      min="20"
+                      max="20000"
+                      step="1"
+                      value="20000"
+                      inputmode="numeric"
+                    /><i>Hz</i>
+                  </span>
+                </label>
+              </div>
+              <div class="range-actions">
+                <button type="button" class="range-full" id="rangeFull">
+                  Full 20–20k
+                </button>
+                <button type="button" class="range-apply" id="rangeApply">
+                  Apply
+                </button>
+              </div>
+              <p class="range-note">
+                The eight points are redistributed across this span.
+              </p>
+            </div>
+          </div>
+          <div class="readouts" id="readouts">
+            <div class="readout">
+              <span class="readout-label">Frequency</span>
+              <span class="readout-value" id="readFreq">—</span>
+            </div>
+            <div class="readout">
+              <span class="readout-label">Gain</span>
+              <span class="readout-value" id="readGain">—</span>
+            </div>
+            <div class="readout">
+              <span class="readout-label">Q</span>
+              <span class="readout-value" id="readQ">—</span>
+            </div>
+          </div>
+          <div class="eq-hint" id="eqHint">Drag · scroll for Q</div>
+        </div>
+      </section>
+
+      <section class="stage" id="stage" aria-label="Image preview">
+        <canvas id="previewCanvas"></canvas>
+        <div class="stage-hud">
+          <div class="hud-left">
+            <span class="hud-pill hud-file">
+              <span class="live-dot" aria-hidden="true"></span>
+              <span id="sourceName">Loading…</span>
+            </span>
+            <span class="hud-pill mono" id="sourceDims">—</span>
+            <span class="hud-pill mono" id="fftInfo" title="Live preview FFT resolution">FFT 512²</span>
+          </div>
+          <div class="hud-right">
+            <span class="hud-pill mono hud-timing" id="timingInfo">—</span>
+            <span class="hud-pill hud-bypass" id="bypassPill" hidden>BYPASSED</span>
+          </div>
+        </div>
+        <div class="stage-empty" id="emptyState" hidden>
+          <div class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48" width="42" height="42">
+              <rect x="6" y="9" width="36" height="30" rx="4" />
+              <circle cx="17" cy="19" r="3.5" />
+              <path d="M9 34l10-10 7 7 5-5 8 8" />
+            </svg>
+          </div>
+          <div class="empty-title">Drop an image</div>
+          <div class="empty-sub">or paste from the clipboard</div>
+          <button class="ghost" id="emptyOpenBtn" type="button">Choose a file</button>
+        </div>
+        <div class="stage-loading" id="stageLoading">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="loadingLabel">Analyzing spectrum…</span>
+        </div>
+        <div class="stage-hint" id="stageHint">Drag the divider to compare</div>
+        <div class="drop-overlay" id="dropOverlay">
+          <div class="drop-card">
+            <svg viewBox="0 0 40 40" width="30" height="30" aria-hidden="true">
+              <path d="M20 27V9M13 16l7-7 7 7M7 26v5h26v-5" />
+            </svg>
+            <span>Drop to load image</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <input type="file" id="fileInput" accept="image/*" hidden />
+
+    <script src="js/fft.js?v=5"></script>
+    <script src="js/eq.js?v=5"></script>
+    <script src="js/pipeline.js?v=5"></script>
+    <script src="js/curve-ui.js?v=5"></script>
+    <script src="js/app.js?v=5"></script>
+  </body>
+</html>
