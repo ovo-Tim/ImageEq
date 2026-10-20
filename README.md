@@ -2,91 +2,100 @@
 
 **Live:** https://ovo-tim.github.io/ImageEq/
 
-纯前端的图像频谱均衡器：对图片做二维 FFT，把空间频率映射到一条仿 GarageBand Channel EQ 的曲线上，拖动不同频段就能改变画面里对应尺度的结构，并实时预览。
+A pure-frontend spectral equalizer for images. It runs a 2D FFT on the picture, maps spatial frequencies onto a GarageBand-style EQ curve, and lets you drag eight bands to shape which image structures survive. Everything runs in the browser; there is no build step, backend, or dependency.
 
-增益使用线性百分比：**100% = 原始强度，0% = 完全移除，150% = 最大提升**。
 
-曲线有两种基准面，用底部 **Base** 切换，控制点逻辑也不同：
+Levels are linear percentages: **100% = unchanged, 0% = remove, 150% = maximum boost**.
 
-- **Zero（0%）**：曲线从 0% 开始，每个点只叠加自己的局部贡献。全部 0% 时输出黑图；拉起一个点只会得到一条干净的局部钟形，适合单独观察某个频段。
-- **Flat（100%）**：曲线从 100% 开始，每个点是相对 100% 的局部增减。全部 100% 时等于原图。
-- 两种模式下，停在基准面上的控制点都是“无影响”，不会拉扯相邻频段的曲线。
+## Base planes
 
-底部 **Range** 可以手动设置 EQ 的频率跨度（默认 20–20 000 Hz）。8 个控制点会按相对位置重新分布到这个范围，坐标轴标签和频率读数同步更新，拖动节点也被限制在这个范围内。
+The control points follow one of two base planes, selected with the **Base: Zero / Flat** switch in the EQ footer:
 
-所有频段始终参与运算，不需要手动开关某个控制点。没有构建步骤、没有依赖、没有后端。打开就能用。
+- **Flat (100%)** — the curve starts at 100%. Each point is a local deviation from 100%:
+  `curve(f) = 100 + Σ (levelᵢ − 100) × shapeᵢ(f)`.
+  All bands at 100% reproduce the original image. A point resting at 100% contributes nothing, so it cannot pull on a neighbouring band's bell.
+- **Zero (0%)** — the curve starts at 0%. Each point adds its own local contribution:
+  `curve(f) = Σ levelᵢ × shapeᵢ(f)`.
+  All bands at 0% produce black. Raise a single point to isolate just that frequency band.
 
-## 运行
+`shapeᵢ(f)` is the band's own 0…1 bell/shelf response. Points sitting on the base plane are neutral by definition, which is why the selected green band keeps a clean curve even when other points are nearby.
 
-Web Worker 需要 HTTP 环境，不能直接双击 `index.html`（`file://` 下浏览器会拦截 worker）：
+The app opens on **Flat** with the original image.
+
+## Frequency range
+
+The footer **Range** button opens a small panel with `From` / `To` inputs (20–20 000 Hz). The eight control points are redistributed across the chosen span while keeping their relative positions; the axis labels, ticks, and frequency readouts follow. Drag range is clamped to the chosen span. `Full 20–20k` restores the full range.
+
+The range is a control/display span, not a hard band-pass: band shapes can still have small tails just outside it. It persists across presets and images during the session, and resets to 20–20k on reload.
+
+## Presets
+
+| Preset | What it does |
+| --- | --- |
+| **Flat** | Base 100%, all bands at 100%. Original image (default). |
+| **Zero** | Base 0%, all bands at 0%. Black output; ideal for isolating one band. |
+| Clarity | Subtle high-frequency lift and detail. |
+| Warm | Low-frequency lift with a softer top end. |
+| Crisp | Stronger upper-mid/high texture. |
+| Punch | Boosted lows and highs, scooped mids. |
+| Dreamy | Softened highs and a gentler low end. |
+| Faded | A reversed, muted curve. |
+| Custom | Shown after any manual edit. |
+
+## Controls
+
+- **Drag a node** — vertical changes level, horizontal changes center frequency.
+- **⌘/Ctrl + drag** — constrain the drag to one axis.
+- **Scroll** over the graph — change the selected band's Q (width).
+- **Drag the shaded band's side lines** — change Q only.
+- **Click a band icon** — select that band.
+- **Click empty graph space** — deselect.
+- **Base: Zero / Flat** — switch control-point logic and reset the bands to that plane.
+- **Range** — set the custom EQ frequency span.
+- **Power / B** — bypass, showing the original image.
+- **Drag the divider** in the preview — compare original (left) with processed (right).
+- **Open Image / drop / paste** — load another image.
+- **Export PNG** — render the current curve at up to 2048 px, preserving alpha.
+
+## Run locally
+
+Browsers block Web Workers on `file://`, so serve the folder over HTTP:
 
 ```bash
 cd ImageEq
 python3 -m http.server 8000
-# 打开 http://localhost:8000
+# open http://localhost:8000
 ```
 
-也可以换成任意静态服务器（`npx serve`、VS Code Live Server 等）。
+Any static server works (`npx serve`, VS Code Live Server, etc.).
 
-## 预设
+## How it works
 
-| 预设 | 作用 |
-| --- | --- |
-| **Zero** | 切到 Zero 基准并把八段设为 0%；曲线贴底，输出黑图。从零拉起一个点即可单独观察该频段（启动默认） |
-| **Flat** | 切到 Flat 基准并把八段设为 100%；结果等于原图 |
-| Clarity | 轻提高频和细节 |
-| Warm | 低频抬升、高频收敛 |
-| Crisp | 强化中高频纹理 |
-| Punch | 低频 + 高频两头抬 |
-| Dreamy | 压低高频、柔化细节 |
-| Faded | 反向的柔和曲线 |
-| Custom | 手动拖动后的状态 |
+- Each RGB channel is FFT'd independently, with three Web Workers running in parallel.
+- The image is fitted into a 512×512 square using mirrored edge padding, avoiding hard seams at the FFT boundary.
+- The mean is removed before the forward transform. The complex spectrum is cached; changing the curve only re-applies the radial gain table and runs the inverse FFT.
+- DC (the mean) is scaled by the lowest-frequency gain, so a 0% Zero plane produces true black instead of a flat average color. The gain table stores linear amplitude multipliers from 0 to 1.5.
+- Eight bands cover the log frequency axis: a low shelf, six bells, and a high shelf. The displayed/control range is independent of the full FFT radial mapping; changing it recalculates the eight absolute frequencies while keeping their relative positions.
+- The frequency labels are a logarithmic mapping of spatial frequency, not real audio frequencies. Radial distance from DC to Nyquist is normalized to 0–1 and labelled `f = 20 × 1000^r`; "1 kHz" therefore means roughly 57% of the Nyquist radius.
+- The live preview is 512². PNG export picks 512/1024/2048 based on the source image (longest side rounded up to a power of two, capped at 2048) and renders in temporary workers so the live preview is not disturbed.
 
-底部 `Base: Zero / Flat` 随时切换基准面并重置到该基准；预设里的 Zero / Flat 效果相同。
+## Deployment
 
-## 操作
+Every push to `main` runs `.github/workflows/pages.yml` and publishes the site through GitHub Pages. The workflow copies only the static files into the Pages artifact and adds `.nojekyll`.
 
-- **拖节点**：上下改百分比增益，左右改中心频率。一个节点只在自己的绿色区域附近产生独立的钟形/架形；远处的曲线由其他节点决定。
-- **Base Zero / Flat**：切换 0% / 100% 基准面，八段同时重置到该基准。
-- **Range**：点开底部的频率范围面板，输入 From / To（20–20 000 Hz）后 Apply；`Full 20–20k` 恢复全范围。范围会保留到你下次修改，但刷新页面会回到 20–20k。
-- **点击频段图标**：选中该频段（图标颜色与曲线区域对应）。
-- **⌘/Ctrl + 拖**：锁定到水平或垂直方向。
-- **滚轮**：改变选中频段的 Q（带宽）。
-- **拖选中频段两侧的竖线**：只改 Q。
-- **点空白处**：取消选择。
-- **Power / B**：旁通，直接看原图。
-- **拖动预览中间的分隔线**：左原图 / 右处理后对比。
-- **Open Image / 拖入 / 粘贴**：换图。
-- **Export PNG**：按当前曲线导出，保留透明通道。
-
-## 实现
-
-- 每个 RGB 通道单独做 2D FFT（三个 Web Worker 并行）。
-- 图片先按比例缩放到 512×512，四周用镜像像素填充，减少 FFT 在画布边缘产生的硬接缝。
-- 每个通道减去均值后做正向 FFT；调整 EQ 时只重新乘上径向增益表并做逆 FFT，正向谱缓存复用。
-- 均值（DC）单独乘以最低频段的增益；因此全 0% 得到纯黑，而不是一张灰色的平均色图。增益表存的是 0–1.5 的线性幅度倍数。
-- 八个频段按对数频率轴排布：低架、六个钟形、高架。每个频段有一个 0…1 的形状 `s_i(f)`，曲线直接按基准面叠加各点的局部偏差：
-  - Flat 基准：`100 + Σ(level_i - 100) × s_i(f)`
-  - Zero 基准：`0 + Σ(level_i) × s_i(f)`
-  - 结果 clamp 到 0–150。停在基准面上的点偏差为 0，因此不会影响相邻频段的钟形；单点拉起就是一条独立的局部曲线。
-- 显示/控制范围（Range）独立于 FFT 的完整径向映射：轴、刻度和 8 个频点的位置按选定范围做对数映射；改变范围时，8 个频点保持相对位置、绝对频率重新计算，因此它们作用的图像空间频率段也随之移动。频段形状的尾巴仍可能略微伸出范围（不是硬带通）。
-- 曲线直接采样成 512 点的径向增益表（0–1.5 的幅度倍数）。
-- 逆变换后加回缩放后的 DC，按原 alpha 合成 RGBA。
-- 频率轴标签 20 Hz–20 kHz 是**对数空间频率的刻度**，不是真实声音频率：径向距离从 DC 到 Nyquist 归一化为 0–1，`f = 20 × 1000^r`。所以 “1 kHz” 表示奈奎斯特半径的约 57%。
-- 预览固定 512²，导出按原图尺寸选 512/1024/2048 的 FFT（长边向上取 2 的幂，最多 2048），用临时 worker 渲染，不打断实时预览。
-
-## 文件
+## Files
 
 ```
-index.html        界面结构
-styles.css        全屏深色界面
-js/fft.js         radix-2 复数 FFT + 2D 封装
-js/fft-worker.js  单通道频谱缓存与重渲染
-js/eq.js          8 段 EQ 模型、预设、增益表
-js/pipeline.js    三 worker 预览管线 + 高分辨率导出
-js/curve-ui.js    曲线绘制与拖拽交互
-js/app.js         图片载入、预览合成、导出、事件
+index.html         app markup
+styles.css         full-screen dark UI
+js/fft.js          radix-2 complex FFT + 2D helpers
+js/fft-worker.js   per-channel spectrum cache and re-render
+js/eq.js           eight-band EQ model, presets, base planes, ticks
+js/pipeline.js     three-worker preview pipeline + high-resolution export
+js/curve-ui.js     curve drawing and pointer editing
+js/app.js          image loading, preview compositing, export, events
+.github/workflows/pages.yml  GitHub Pages deployment
 favicon.svg
 ```
 
-已验证：Chrome（桌面 / 390 px 移动布局）；Zero 输出纯黑，Flat 下 FFT 往返与原图逐像素一致，单点拉起时其余频段保持在基准、钟形不被邻点拉扯；自定义 100–5 000 Hz 范围后轴标签与读数同步、节点保持相对位置；透明 PNG 导出保留 alpha。
+Verified in Chrome at desktop, tablet, and 390 px mobile widths: Zero exports pure black, Flat round-trips the FFT pixel-for-pixel, a single raised point leaves the rest of the curve on its base, and transparent PNG export preserves alpha.

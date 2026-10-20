@@ -75,7 +75,7 @@
   ];
 
   function makeBands() {
-    return presetBands(PRESETS[0]);
+    return presetBands(PRESETS[1]);
   }
 
   function freqToNorm(freq, range) {
